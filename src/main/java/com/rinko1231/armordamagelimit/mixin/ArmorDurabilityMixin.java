@@ -23,25 +23,48 @@ public class ArmorDurabilityMixin {
     @Inject(method = "hurtArmor", at = @At("HEAD"), cancellable = true)
     private void modifyArmorDurability(DamageSource source, float amount, int[] slots, CallbackInfo ci) {
         if (!(amount <= 0.0F)) {
-            amount /= 4.0F;
+            // Calculate the tiered damage based on original hit damage
+            int tierDamage = calculateTierDamage(amount);
+            
             for (int i : slots) {
-                // 获取护甲物品栈
                 ItemStack armorItem = armor.get(i);
-                if ((!source.is(DamageTypeTags.IS_FIRE) || !armorItem.getItem().isFireResistant()) && armorItem.getItem() instanceof ArmorItem)  {
+                
+                if (!armorItem.isEmpty() && armorItem.getItem() instanceof ArmorItem &&
+                    (!source.is(DamageTypeTags.IS_FIRE) || !armorItem.getItem().isFireResistant())) {
+                    
                     String itemId = BuiltInRegistries.ITEM.getKey(armorItem.getItem()).toString();
+                    
+                    // Check if item is blacklisted
                     if (!ArmorProtectionConfig.itemProtectionBlacklist.get().contains(itemId)) {
-                        int maxDurability = armorItem.getMaxDamage();
-                        float maxAllowedDamage = (float) (maxDurability * ArmorProtectionConfig.maxArmorDurabilityLossPercent.get());
-                        amount = Math.min(amount, maxAllowedDamage);// 确保耐久损失不超过设定的最大值
+                        // Apply tiered damage
+                        if (tierDamage > 0) {
+                            armorItem.hurtAndBreak(tierDamage, ((Inventory) (Object) this).player, 
+                                (player) -> player.broadcastBreakEvent(EquipmentSlot.byTypeAndIndex(EquipmentSlot.Type.ARMOR, i)));
+                        }
+                    } else {
+                        // Apply normal vanilla damage to blacklisted items
+                        float vanillaDamage = amount / 4.0F;
+                        int normalDamage = Math.max(1, (int) vanillaDamage);
+                        
+                        armorItem.hurtAndBreak(normalDamage, ((Inventory) (Object) this).player, 
+                            (player) -> player.broadcastBreakEvent(EquipmentSlot.byTypeAndIndex(EquipmentSlot.Type.ARMOR, i)));
                     }
-                    if (amount < 1.0F) {
-                        amount = 1.0F;
-                    }
-                    armorItem.hurtAndBreak((int) amount, ((Inventory) (Object) this).player, (ThePlayer) ->
-                            ThePlayer.broadcastBreakEvent(EquipmentSlot.byTypeAndIndex(EquipmentSlot.Type.ARMOR, i)));
                 }
             }
         }
         ci.cancel();
+    }
+    
+    /**
+     * Calculate damage based on configurable tiered system
+     */
+    private int calculateTierDamage(float originalDamage) {
+        if (originalDamage <= ArmorProtectionConfig.tier1Threshold.get()) {
+            return ArmorProtectionConfig.tier1Damage.get();
+        } else if (originalDamage <= ArmorProtectionConfig.tier2Threshold.get()) {
+            return ArmorProtectionConfig.tier2Damage.get();
+        } else {
+            return ArmorProtectionConfig.tier3Damage.get();
+        }
     }
 }
